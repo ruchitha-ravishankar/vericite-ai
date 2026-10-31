@@ -1,87 +1,63 @@
-# MCP Defense Lab: Measuring MCP Defenses with a Real Agent in the Loop
+# VeriCite AI: Research Agent with Citations
 
-[![CI Test Suite](https://github.com/ruchitha-ravishankar/rooman-ai-challenge/actions/workflows/ci.yml/badge.svg)](https://github.com/ruchitha-ravishankar/rooman-ai-challenge/actions)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com)
-[![Streamlit](https://img.shields.io/badge/Streamlit-Dashboard-orange.svg)](https://streamlit.io)
+A retrieval-augmented research agent that answers technical questions from a document corpus, attaches sentence-level citations to its answers, checks claims against the retrieved evidence, and refuses questions the corpus cannot answer.
 
-**MCP Defense Lab** is an open-source, reproducible security evaluation and research framework. It empirically measures how effectively defensive mechanisms prevent **Tool Poisoning Attacks (TPA)** and indirect prompt injections on Model Context Protocol (MCP) agents, while simultaneously evaluating the preservation of legitimate task completion.
+Built for the Rooman AI Challenge (Junior AI Research Associate selection round), Agent Track: Research Agent with Citations.
 
----
+## Problem Statement
 
-## 📌 The "One Sentence" Formulation
-> *"MCP Defense Lab provides an end-to-end evaluation harness featuring a real agent loop, isolated safe simulation, 5 distinct defense strategies (including a novel Intent-Alignment defense), bounded adaptive fuzzing, and SQLite auditability to rigorously measure agent security trade-offs."*
+Language-model answers to technical questions are often fluent but unsupported. This project explores a research agent whose every claim can be traced to a specific passage, and which declines to answer when the evidence is weak.
 
----
+## Key Features
 
-## 🛡️ Defenses Implemented & Evaluated
+- **Hybrid retrieval:** BM25 (Okapi) keyword search combined with dense embeddings using Reciprocal Rank Fusion (k = 60).
+- **Document ingestion:** PDF (page-aware), Markdown, TXT and JSON loaders with sliding-window chunking (650 characters, 120 overlap).
+- **Citations:** answers carry markers of the form `[^doc#chunk]` linked to the source document, section, page and quote.
+- **Refusal guardrail:** if retrieval relevance falls below a threshold (0.180), the agent declines instead of guessing.
+- **Claim verification:** generated sentences are checked against retrieved text using N-gram overlap.
+- **Query decomposition:** complex questions are split into sub-queries.
+- **Interfaces:** a FastAPI web app and a terminal CLI.
+- **Pluggable LLM backend:** Gemini, OpenAI, Groq or Ollama through `.env`, or a built-in local mode that needs no API key.
 
-All defenses implement a uniform `DefenseStrategy` interface emitting structured decisions (`allow`, `block`, `abstain`), reason codes, explanations, and latency telemetry:
+## Technology Stack
 
-1. **No-Defense Baseline**: Control baseline measuring unmitigated agent vulnerability (with simulator sandbox safeguards active).
-2. **Keyword Rule Scanner**: High-speed deterministic regex scanner inspecting tool names, arguments, and metadata for prompt injection signatures and high-risk paths (`~/.ssh/id_rsa`, `/etc/shadow`).
-3. **LLM Judge Scanner**: Secondary model-based evaluator inspecting candidate proposals and tool descriptions for semantic hijacking.
-4. **Schema Pinning & RBAC Adapter**: Cryptographic tool schema hash pinning (detecting dynamic "rug pull" metadata injections) paired with role-based capability boundaries (Least Privilege).
-5. **Intent-Alignment Defense (Our Novel Defense)**: Evaluates semantic and lexical grounding between the user's explicit request and candidate tool calls. Detects irrelevant tool calls, parameter tampering, unprompted side effects, suspicious data access, and metadata injection instructions. Enforces a **strict fail-closed policy** on ambiguous side effects.
+Python, FastAPI, Pydantic, rank-bm25, pypdf, pytest, Rich (CLI), vanilla HTML/CSS/JS front end. Optional LLM providers: Gemini, OpenAI, Groq, Ollama.
 
----
-
-## 📊 Empirical Evaluation Results
-
-Evaluated on the 40-case balanced benchmark suite (20 Attack cases across Template-1, Template-2, and Template-3; 20 Benign tasks) using deterministic seed control:
-
-| Defense Strategy | Attack Success Rate (ASR) [95% Wilson CI] | Benign Task Completion (TCR) [95% CI] | False Positive Rate (FPR) | Defense Block Rate | Relative ASR Reduction | Median Total Latency |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **No-Defense Baseline** | **95.0%** [76.4% – 99.1%] | 85.0% [64.0% – 94.8%] | 0.0% | 0.0% | 0.0% (Ref) | 0.01 ms |
-| **Keyword Rule Scanner** | **0.0%** [0.0% – 16.1%] | 85.0% [64.0% – 94.8%] | 0.0% | 47.5% | **100.0%** | 0.03 ms |
-| **LLM Judge Scanner** | **15.0%** [5.2% – 36.0%] | 85.0% [64.0% – 94.8%] | 0.0% | 40.0% | **84.2%** | 0.50 ms |
-| **Schema Pinning & RBAC** | **0.0%** [0.0% – 16.1%] | 85.0% [64.0% – 94.8%] | 5.0% | 50.0% | **100.0%** | 0.01 ms |
-| **Intent-Alignment Defense** | **0.0%** [0.0% – 16.1%] | **85.0%** [64.0% – 94.8%] | **0.0%** | 47.5% | **100.0%** | 0.02 ms |
-
-> [!NOTE]
-> All metrics use explicit denominators. Invalid model outputs and agent refusals are tracked separately and not counted automatically as successful defenses.
-
----
-
-## 🏗️ Architecture & Safe Simulator
+## System Architecture
 
 ```
-[User Request] + [MCP Tool Catalog]
-               │
-               ▼
-      ┌─────────────────┐
-      │  Agent Runtime  │ ◄───► [Scripted Mock Provider / Ollama Local LLM]
-      └────────┬────────┘
-               │ Candidate Tool Proposal
-               ▼
-      ┌─────────────────┐
-      │  Defense Layer  │ ───► Decision: ALLOW / BLOCK / ABSTAIN + Reason Code
-      └────────┬────────┘
-               │ (Allowed proposals only)
-               ▼
-      ┌─────────────────────────────────────────────────────────┐
-      │                  Safe Simulator Sandbox                 │
-      │  - Isolated In-Memory Virtual File System (VFS)         │
-      │  - Virtual Shell Parser (Zero Host OS Subprocesses)     │
-      │  - Virtual Network Egress (Zero Physical Packets Sent)   │
-      └────────────────────────────┬────────────────────────────┘
-                                   │ Side-Effects & Telemetry
-                                   ▼
-      ┌─────────────────────────────────────────────────────────┐
-      │            SQLite Audit Store (mcp_defense_lab.db)      │
-      └────────────────────────────┬────────────────────────────┘
-                                   │
-             ┌─────────────────────┼─────────────────────┐
-             ▼                     ▼                     ▼
-     [Rich Terminal CLI]   [FastAPI REST API]    [Streamlit Dashboard]
+Question -> Query analyzer (sub-queries)
+         -> Hybrid retriever (BM25 + dense, fused with RRF)
+         -> Relevance check (refuse if below threshold)
+         -> Synthesizer (cited answer)
+         -> Verifier (claim vs. evidence check)
+         -> Answer + citations + verification report
 ```
 
----
+## Project Structure
 
-## 🚀 Quickstart Guide
+```
+app/
+  config.py        settings and retrieval hyperparameters
+  models/          Pydantic schemas (documents, research, benchmark)
+  ingestion/       loaders and chunker
+  retrieval/       bm25.py, dense.py, hybrid.py, indexer.py
+  agent/           engine, query analyzer, synthesizer, verifier, LLM provider
+  api/             FastAPI routes and server
+  static/          web interface
+data/
+  sources/         8 research documents used as the corpus
+  questions.json   10 benchmark questions with expected outcomes
+docs/
+  retrieval_approach.md
+  tradeoffs.md
+tests/             ingestion, retrieval, agent and unanswerable-query tests
+cli.py             terminal interface and benchmark runner
+run.sh             one-command setup and start
+```
 
-### 1. Installation
+## Installation
+
 ```bash
 git clone https://github.com/ruchitha-ravishankar/rooman-ai-challenge.git
 cd rooman-ai-challenge
@@ -90,61 +66,67 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Run Multi-Defense Benchmark
-Run all defenses across 40 benchmark cases in under 1 second:
+Optional: to use an external LLM, copy `.env.example` to `.env` and add your own key. Never commit `.env`.
+
+## How to Run
+
+Quick start (creates the environment, installs dependencies, indexes the corpus, starts the server):
+
 ```bash
-python cli.py run-experiment --defense all --cases 40
+./run.sh
 ```
 
-### 3. Run Adaptive Fuzzing Evaluation
-Test defense degradation under adversarial mutations (synonym substitution, zero-width chars, benign wrappers, path obfuscations):
+Or start the web app manually and open http://localhost:8000:
+
 ```bash
-python cli.py run-fuzz --defense intent_alignment_defense --mutations 2 --cases 20
+uvicorn app.api.server:app --host 0.0.0.0 --port 8000
 ```
 
-### 4. Inspect Results
-Display formatted result tables from SQLite:
+CLI:
+
 ```bash
-python cli.py show-results
+python cli.py                       # interactive mode
+python cli.py --query "your question"
+python cli.py --benchmark           # run the 10-question benchmark
+python cli.py --list-docs           # list indexed documents
 ```
 
-### 5. Launch Interactive Research Dashboard
-```bash
-streamlit run mcp_defense_lab/dashboard/app.py
-```
+Run the tests:
 
-### 6. Launch REST API Server
-```bash
-uvicorn mcp_defense_lab.api.app:app --host 127.0.0.1 --port 8000
-```
-API Documentation: `http://127.0.0.1:8000/docs`
-
----
-
-## 🧪 Testing & Verification
-
-Run the complete 100% offline unit, integration, and security test suite:
 ```bash
 pytest tests/ -v
 ```
 
----
+## Screenshots / Demo
 
-## 📂 Documentation Sitemap
+_Add 2 screenshots here: the web interface showing an answer with citations, and a refusal on an out-of-corpus question._
 
-- [AGENTS.md](AGENTS.md) — Operational instructions and constraints for AI agents.
-- [docs/architecture.md](docs/architecture.md) — Detailed system design and component interfaces.
-- [docs/threat-model.md](docs/threat-model.md) — MCP tool poisoning threat model and attack paradigms.
-- [docs/methodology.md](docs/methodology.md) — Scientific experimental protocol and control variables.
-- [docs/metrics.md](docs/metrics.md) — Mathematical formulas, denominators, and Wilson confidence intervals.
-- [docs/data-provenance.md](docs/data-provenance.md) — Upstream licensing review and clean synthetic benchmark policy.
-- [docs/limitations.md](docs/limitations.md) — Scope boundaries, simulation vs physical execution, and future work.
-- [docs/experiment-runbook.md](docs/experiment-runbook.md) — Step-by-step reproduction guide for researchers.
+## Results
 
----
+On the 10-question benchmark in `data/questions.json` (8 factual, comparative and multi-document questions, 2 out-of-corpus questions), the system answered the 8 answerable questions with the expected source citations and refused both unanswerable ones.
 
-## ⚖️ License & Ethical Responsible Disclosure
+| Category | Questions | Outcome |
+|---|---|---|
+| Factual | 5 | Expected source cited |
+| Comparative | 2 | Expected source cited |
+| Multi-document | 1 | Both expected sources cited |
+| Out-of-corpus | 2 | Refused, no sources |
 
-This project is licensed under the [MIT License](LICENSE). All synthetic fixtures are provided under MIT / CC0 for open academic research.
+**How to read these results:** the benchmark and the corpus were both written by the author and are small, so this shows the pipeline works end to end; it is not evidence of general accuracy. Latencies in the original report (about 2 ms) were measured with the local, no-API mode and do not reflect LLM-backed runs.
 
-In accordance with responsible disclosure, all attacks executed by this repository are strictly sandboxed inside `SafeSimulator`. No external systems are targeted.
+## Challenges and Learnings
+
+- Calibrating the refusal threshold: too low and the agent answers off-topic questions, too high and it refuses valid ones. See `docs/tradeoffs.md`.
+- Combining keyword and semantic retrieval: BM25 handles exact terms, acronyms and numbers better, while embeddings handle paraphrase, so the two are fused with RRF.
+- N-gram claim verification is a lightweight check and can miss paraphrased or subtly wrong claims.
+
+## Future Enhancements
+
+- Larger, independently written evaluation set, with standard retrieval metrics (recall@k, MRR).
+- Cross-encoder reranking.
+- Entailment-model-based claim verification instead of N-gram overlap.
+- Support for user-uploaded corpora with persistent storage.
+
+## License
+
+MIT. See `LICENSE`.
